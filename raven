@@ -1,0 +1,142 @@
+#!/bin/bash
+#Script to install from folders
+
+if ! [ $(id -u) = 0 ]
+then
+   echo "This script must be ran as root!"
+   exit 1
+fi
+
+if [ "$1" = "" ]
+then
+   echo "Syntax: raven <sourcefolder> <destinationfolder>"
+   exit 1
+fi
+
+if [ "$2" = "" ]
+then
+   echo "Syntax: raven <sourcefolder> <destinationfolder>"
+   exit 1
+fi
+
+echo "Please enter service name"
+read service_name
+
+echo "Service description (defaults to service name)"
+read service_desc
+if [ "$service_desc" = "" ]
+then
+   service_desc=$service_name
+fi
+
+echo "Please enter dependencies (default network.target)"
+read dependencies
+if [ "$dependencies" = "" ]
+then
+   dependencies=network.target
+fi
+
+echo "Please enter start type (default simple)"
+read start_type
+if [ "$start_type" = "" ]
+then
+   start_type=simple
+fi
+
+
+echo "Please enter the user to run the program as (default root)"
+read system_user
+
+echo "Please enter a prestart command (default none)"
+read prestart_command
+
+echo "Please enter a start command"
+read start_command
+echo "Captured input: $start_command"
+
+echo "Please enter a stop command"
+read stop_command
+echo "Captured input: $stop_command"
+
+echo "Do you want a restart timer y/n? (default n)"
+read restart_timer
+
+echo "Do you want autorestart on failure y/n? (default n)"
+read service_restart
+
+#Create service file
+touch /etc/systemd/system/$service_name.service
+
+echo -e "[Unit]\n" > /etc/systemd/system/$service_name.service
+echo -e "Description=${service_desc}\n" >> /etc/systemd/system/$service_name.service
+echo -e "\n" >> /etc/systemd/system/$service_name.service
+
+echo -e "[Service]\n" >> /etc/systemd/system/$service_name.service
+echo -e "WorkingDirectory=${2}" >> /etc/systemd/system/$service_name.service
+if ! [ "$system_user" = "" ]
+then
+   echo -e "User=${system_user}\n" >> /etc/systemd/system/$service_name.service
+   echo -e "Group=${system_user}\n" >> /etc/systemd/system/$service_name.service
+fi
+echo -e "Type=${start_type}" >> /etc/systemd/system/$service_name.service
+echo -e "\n" >> /etc/systemd/system/$service_name.service
+
+if ! [ "$prestart_command" = "" ]
+then
+   echo -e "ExecStartPre=${prestart_command}\n" >> /etc/systemd/system/$service_name.service
+fi
+echo -e "ExecStart=${start_command}\n" >> /etc/systemd/system/$service_name.service
+echo -e "ExecStop=${stop_command}\n" >> /etc/systemd/system/$service_name.service
+echo -e "\n" >> /etc/systemd/system/$service_name.service
+
+if [ "$service_restart" = "y" ]
+then
+   echo -e "Restart=on-failure\n" >> /etc/systemd/system/$service_name.service
+   echo -e "RestartSec=60s\n" >> /etc/systemd/system/$service_name.service
+   echo -e "\n" >> /etc/systemd/system/$service_name.service
+fi
+
+echo -e "[Install]\n" >> /etc/systemd/system/$service_name.service
+echo -e "WantedBy=multi-user.target\n" >> /etc/systemd/system/$service_name.service
+
+if [ "$service_restart" = "y" ]
+then
+   touch /etc/systemd/system/$service_name-restart.timer
+   echo -e "[Timer]\n" > /etc/systemd/system/$service_name-restart.timer
+   echo -e "OnActiveSec=24h\n" >> /etc/systemd/system/$service_name-restart.timer
+   echo -e "OnUnitActiveSec=24h\n" >> /etc/systemd/system/$service_name-restart.timer
+   echo -e "\n" >> /etc/systemd/system/$service_name-restart.timer
+
+   echo -e "[Install]" >> /etc/systemd/system/$service_name-restart.timer
+   echo -e "WantedBy=timer.target" >> /etc/systemd/system/$service_name-restart.timer
+
+   touch /etc/systemd/system/$service_name-restart.service
+   echo -e "[Unit]\n" > /etc/systemd/system/$service_name-restart.service
+   echo -e "Description=${service_name} restart\n" >> /etc/systemd/system/$service_name-restart.service
+   echo -e "\n" >> /etc/systemd/system/$service_name-restart.service
+   echo -e "[Service]\n" >> /etc/systemd/system/$service_name-restart.service
+   echo -e "Type=oneshot\n" >> /etc/systemd/system/$service_name-restart.service
+   echo -e "ExecStart=/bin/systemctl restart $service_name" >> /etc/systemd/system/$service_name-restart.service
+fi
+
+#Move the program into the folder
+mv $1 $2
+
+#User handling and permissions
+groupadd $system_user
+useradd $system_user -g $system_user
+chown -R $system_user:$system_user $2
+
+echo "Do you want to start the service now y/n? (default y)"
+read start_service_now
+if [ "$start_service_now" = "y" ]
+then
+   systemctl enable $service_name.service
+   systemctl start $service_name.service
+fi
+
+if [ "$restart_timer" = "y" ]
+then
+   systemctl enable $service_name.timer
+   systemctl start $service_name.timer
+fi
